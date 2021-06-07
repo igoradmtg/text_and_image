@@ -6,6 +6,10 @@ Install php , php-gd, php-mbstring.
 
 Download all files.
 
+# Example
+
+![alt text](examples/2_Advanced_1.jpg "Example image")
+
 # Usage
 
 require __DIR__ . "/textimage.class.php";
