@@ -1,431 +1,487 @@
 <?php
+
 /**
- * Most useful and easy to use PHP library for adding any text to an image
+ * Библиотека для добавления текста на изображения с использованием PHP и GD.
+ * Позволяет настраивать шрифт, цвет, выравнивание, фон и многое другое.
  *
  * @license MIT
+ * @author  Igoramdtg
  */
 namespace Igoramdtg\TextAndImage;
 
 class TextImage {
-
+    // --- Константы для информации о библиотеке ---
     const AUTHOR = 'Igoramdtg';
     const LIB_NAME = 'Text2Image';
-    const VERSION = 1.0;
-    const LIFE_CYRCLE = 'Beta';
+    const VERSION = '1.5.0';
     const LICENSE = 'MIT';
 
-    /* # Public var's, editable by user */
-    public
-        $width = 720, // Width of image box, text will be wrapped withing this box [int]
-        $font = 5, // Font name/family, can be integer font index for Simple mode, or path to TrueType font for Smart mode [int] or [string]
-        $line_height = 'auto', // Height between lines, can be integer or 'auto' [int] or [string]
-        $background_color = array(76, 0, 153, 0), // Color of background, can be array of RGB values and Alpha, or a hex string [array] or [string]
-        $text_color = array(255, 255, 255, 64), // Color of text, can be array of RGB values and Alpha, or a hex string [array] or [string]
-        $padding = 30, // Padding by all side's [int]
-        $angle = 0, // smart-only Text angle [int]
-        $text_size = 17, // smart-only Font size [int]
-        $background_image = '', // background image file name []
-        $user_fonts = array(); // User defined font's
+    // --- Константы для выравнивания текста ---
+    const ALIGN_LEFT = 'left';
+    const ALIGN_CENTER = 'center';
+    const ALIGN_RIGHT = 'right';
+    const VALIGN_TOP = 'top';
+    const VALIGN_MIDDLE = 'middle';
+    const VALIGN_BOTTOM = 'bottom';
 
-    /* # Protected var's, inclass usage */
-    protected
-        $image, // Image resource
-        $is_simple = true, // Switcher between modes, with is Simple or Smart
-        $offset_x = 0, // Text offset by x-horizontal (LTR - left to right)
-        $offset_y = 0, // Text offset by y-vertical (TTB - top to bottom)
-        $pseudo_width, // Text box real width, counted with usage of padding
-        $height, // Height of result image
-        $characters_per_line, // simple-only How many characters can be placed per line
-        $text, // Source text, raw
-        $lines, // Array filled up with ready4draw text lines
-        $pallete; // Pallete for rendering, kind of buffer ... 
+    /* # Общедоступные свойства, настраиваемые пользователем */
 
-    /* # Implementation */
+    /** @var int Ширина создаваемого изображения в пикселях. */
+    public $width = 720;
 
-    // @Constructor
+    /** @var int|string Путь к файлу шрифта .ttf (в "умном" режиме) или индекс встроенного шрифта GD (1-5 в "простом" режиме). */
+    public $font = __DIR__ . '/../examples/assets/Vetrino.ttf'; // Указан путь к примеру шрифта
+
+    /** @var int|string Высота строки. 'auto' для автоматического расчета или целое число. */
+    public $line_height = 'auto';
+
+    /** @var array|string Цвет фона в формате [R, G, B, A] или HEX ('#RRGGBB' или '#RRGGBBAA'). */
+    public $background_color = [20, 20, 20, 0];
+
+    /** @var array|string Цвет текста в формате [R, G, B, A] или HEX. */
+    public $text_color = [255, 255, 255, 0];
+
+    /** @var int Внутренний отступ со всех сторон в пикселях. */
+    public $padding = 30;
+
+    /** @var int Угол наклона текста в градусах (только для "умного" режима). */
+    public $angle = 0;
+
+    /** @var int Размер шрифта в пунктах (только для "умного" режима). */
+    public $text_size = 17;
+
+    /** @var string Путь к файлу фонового изображения. Если указан, он будет использован вместо цвета фона. */
+    public $background_image = '';
+
+    /** @var string Горизонтальное выравнивание текста. Используйте константы: ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT. */
+    public $align = self::ALIGN_LEFT;
+
+    /** @var string Вертикальное выравнивание текста. Используйте константы: VALIGN_TOP, VALIGN_MIDDLE, VALIGN_BOTTOM. */
+    public $valign = self::VALIGN_TOP;
+
+
+    /* # Защищенные свойства для внутреннего использования */
+
+    /** @var resource Ресурс изображения GD. */
+    protected $image;
+
+    /** @var bool Переключатель режима: true для "простого" (встроенные шрифты GD), false для "умного" (TTF шрифты). */
+    protected $is_simple = false; // По умолчанию умный режим, т.к. он более функционален
+
+    /** @var int Горизонтальный отступ для текста. */
+    protected $offset_x = 0;
+
+    /** @var int Вертикальный отступ для текста. */
+    protected $offset_y = 0;
+
+    /** @var int Реальная ширина области для текста (с учетом отступов). */
+    protected $pseudo_width;
+
+    /** @var int Рассчитанная высота изображения. */
+    protected $height;
+
+    /** @var int Количество символов в строке (только для "простого" режима). */
+    protected $characters_per_line;
+
+    /** @var string Исходный текст для нанесения на изображение. */
+    protected $text;
+
+    /** @var array Массив строк, готовых для отрисовки. */
+    protected $lines;
+
+    /**
+     * Конструктор класса.
+     *
+     * @param string $text Исходный текст.
+     */
     public function __construct($text = '') {
+        if (!$this->is_supported()) {
+            throw new \Exception('GD extension is not loaded. Please enable it in your php.ini file.');
+        }
         $this->text = (string)$text;
     }
 
-    // @Definition's maker
-    protected function make_definitions() {
-        $this->pseudo_width = $this->width;
-
-        if ($this->padding) {
-            $this->pseudo_width -= $this->padding * 2;
-            $this->offset_x = $this->padding;
-            if ($this->is_simple)
-                $this->offset_y = $this->padding;
-            else
-                $this->offset_y = $this->text_size + $this->padding;
-        }
-
-        if ($this->line_height == 'auto') {
-            if ($this->is_simple)
-                $this->line_height = imagefontheight($this->font) * 1.5;
-            else
-                $this->line_height = $this->text_size * 1.5;
-        }
-
-        if ($this->is_simple)
-            $this->characters_per_line = floor($this->pseudo_width / imagefontwidth($this->font));
-    }
-
-    // @Text parser
-    protected function parse_text() {
-        // this will define all required stuff for further code
-        $this->make_definitions();
-        $this->lines = array();
-
-        //this will parse text, in short : it will define words in lines, in other word's it will wrap words to make them fit into text box (pseudo_width)
-        if (!empty($this->text)) {
-            $source_lines = preg_split("#(?:\r)?\n#", $this->text, -1);
-
-            if ($this->is_simple) {
-                // parse as simple one, no TrueType, no dimensions, just simple bitmaps of GDF :)
-                // this is lot faster than smart mode
-                // word-wrapping here is based on $characters_per_line, with is defines how many characters will fit in one line
-                foreach ($source_lines as $line) {
-                    $line = trim($line);
-                    // simple-case
-                    // if line is not fiiting into text-box, then ...
-                    if (mb_strlen($line, 'utf-8') > $this->characters_per_line) {
-                        // words separation
-                        $source_words = preg_split('#(\s+)#', $line, -1, PREG_SPLIT_DELIM_CAPTURE);
-                        $words = array();
-
-                        // @too long words protection (words that is not separated with space, but they can be too long for fitting into text box)
-                        for ($j = 0, $wc = count($source_words); $j < $wc; $j++) {
-                            // protection from memory lick
-                            if (mb_strlen($source_words[$j], 'utf-8') > $this->characters_per_line) {
-                                // slice them up, guys ...
-                                while ( $slice = mb_substr($source_words[$j], 0, $this->characters_per_line, 'utf-8') ) {
-                                    $source_words[$j] = mb_substr($source_words[$j], $this->characters_per_line, null, 'utf-8');
-                                    $words[] = $slice;
-                                }
-                            } else {
-                                // direct shifting will break keys nodes, so let's make it the old way
-                                $words[] = $source_words[$j];
-                                unset($source_words[$j]);
-                            }
-                        }
-                        unset($source_words);// unrequired stuff, let's keep thing's simple and clean chunk faster
-
-                        // @lines array creation, this is where word-wrapping happen's exactly
-                        while ($words) {
-                            //while there is still words left ...
-                            $sentence = '';
-
-                            // keep looping, while there is some place for more characters ...
-                            while ( (mb_strlen($sentence, 'utf-8') < $this->characters_per_line) AND ($words) ) {
-                                $old_sentence = $sentence;
-                                $new_word = array_shift($words);
-                                $sentence .= $new_word;
-                            }
-
-                            // unshift, if overflow
-                            if (mb_strlen($sentence, 'utf-8') > $this->characters_per_line) {
-                                $sentence = $old_sentence;
-                                array_unshift($words, $new_word);
-                            }
-
-                            // and ... append ready sentence into $lines array
-                            $this->lines[] = $sentence;
-
-                            // clean some chunk faster, odd, but who care
-                            unset($sentence);
-                            unset($old_sentence);
-                            unset($new_word);
-                        }
-                    } else {
-                        // simple-case
-                        // and if line is fitting into text-box, then ..
-                        $this->lines[] = $line;
-                    }
-                }
-            } else {
-                // parse as smart one, + TrueType, + dimensions, + support of any .TTF font's
-                // this is slower than simple mode
-                // word-wrapping here is based on $dimensions (getting of this is covered in @text_box_width function), with is defines real width of output text
-                foreach ($source_lines as $line) {
-                    $line = trim($line);
-
-                    //smart-case
-                    // if line is not fiiting into text-box, then ...
-                    if ($this->text_box_width($line) > $this->pseudo_width) {
-                        // words separation
-                        $source_words = preg_split('#(\s+)#', $line, -1, PREG_SPLIT_DELIM_CAPTURE);
-                        $words = array();
-
-                        // @too long words protection (words that is not separated with space, but they can be too long for fitting into text box)
-                        for ($j = 0, $wc = count($source_words); $j < $wc; $j++) {
-                            if ($this->text_box_width($source_words[$j]) > $this->pseudo_width) {
-                                // slice them up, guys ...
-
-                                // for faster definition of how much words got to be pushed into $sentence, let's define approximation based on $text_size
-                                $approximate_letters_count_in_slice = floor($this->pseudo_width / $this->text_size);
-
-                                while ($source_words[$j]) {
-                                    //if cases works as swapping-case
-                                    $slice = mb_substr($source_words[$j], 0, $approximate_letters_count_in_slice, 'utf-8');
-                                    $source_words[$j] = mb_substr($source_words[$j], $approximate_letters_count_in_slice, null, 'utf-8');
-                                    if ( $this->text_box_width($slice) > $this->pseudo_width ) {
-                                        // too much, cut ...
-                                        while ( ($this->text_box_width($slice . 'a') > $this->pseudo_width) AND ($slice) AND ($source_words[$j]) ) {
-                                            $index = (mb_strlen($slice, 'utf-8') - 1);
-                                            $source_words[$j] .= $slice[$index];//return letter
-                                            $slice = mb_substr($slice, 0, -1, 'utf-8');//recreate slice
-                                        }
-                                    } else {
-                                        // not enought, add ...
-                                        while ( ($this->text_box_width($slice . 'a') < $this->pseudo_width) AND ($slice) AND ($source_words[$j]) ) {
-                                            $index = (mb_strlen($source_words[$j], 'utf-8') - 1);
-                                            $slice .= $source_words[$j][$index];//add letter
-                                            $source_words[$j] = mb_substr($source_words[$j], 0, -1, 'utf-8');//cut letter
-                                        }
-                                    }
-                                    $words[] = $slice;
-                                }
-                                unset($source_words[$j]);
-                            } else {
-                                // direct shifting will break key nodes, so let's make it the old way
-                                $words[] = $source_words[$j];
-                                unset($source_words[$j]);
-                            }
-                        }
-                        unset($source_words);
-
-                        // @lines array creation, this is where word-wrapping happen's exactly
-                        while ($words) {
-                            //while there is still words left ...
-                            $sentence = '';
-
-                            // keep looping, while there is some place for more characters ...
-                            while ( ($this->text_box_width($sentence) < $this->pseudo_width) AND ($words) ) {
-                                $old_sentence = $sentence;
-                                $new_word = array_shift($words);
-                                $sentence .= $new_word;
-                            }
-
-                            // unshift, if overflow
-                            if ($this->text_box_width($sentence) > $this->pseudo_width) {
-                                $sentence = $old_sentence;
-                                array_unshift($words, $new_word);
-                            }
-
-                            // and ... append ready sentence into $lines array
-                            $this->lines[] = $sentence;
-
-                            // clean some chunk faster, odd, but who care
-                            unset($sentence);
-                            unset($old_sentence);
-                            unset($new_word);
-                        }
-                    } else {
-                        // smart-case
-                        // and if line is fitting into text-box, then ..
-                        $this->lines[] = $line;
-                    }
-                }
-            }
-        }
-    }
-
-    // @Text box width
-    protected function text_box_width($str) {
-        $dimensions = imagettfbbox($this->text_size, $this->angle, $this->font, $str);
-        return $dimensions['2'];
-    }
-
-    // @hex2rgb converter
-    protected function hex2rgb($hex) {
-       $hex = str_replace("#", "", $hex);
-
-       if(strlen($hex) == 3) {
-          $r = hexdec(substr($hex,0,1).substr($hex,0,1));
-          $g = hexdec(substr($hex,1,1).substr($hex,1,1));
-          $b = hexdec(substr($hex,2,1).substr($hex,2,1));
-          $alpha = 0; // Значение в диапазоне от 0 до 127. 0 означает непрозрачный цвет, 127 означает полную прозрачность. 
-       } else {
-          $r = hexdec(substr($hex,0,2));
-          $g = hexdec(substr($hex,2,2));
-          $b = hexdec(substr($hex,4,2));
-          $alpha = hexdec(substr($hex,6,2)); // Значение в диапазоне от 0 до 127. 0 означает непрозрачный цвет, 127 означает полную прозрачность. 
-          if ($alpha>128) {
-            $alpha = 128;
-          }
-       }
-       $rgb = array($r, $g, $b, $alpha);
-       return $rgb; // returns an array with the rgb values
-    }
-
-    protected function render() {
-        // pre-requipment's
-        $this->parse_text();
-        $this->height = count($this->lines) * $this->line_height;
-        if ($this->padding)
-            $this->height += $this->padding * 2;
-        if (!is_array($this->background_color))
-            $this->background_color = $this->hex2rgb($this->background_color);
-        if (!is_array($this->text_color))
-            $this->text_color = $this->hex2rgb($this->text_color);
-
-        // canvas creation
-        $this->image = imagecreatetruecolor($this->width, $this->height);
-        $this->pallete = array(
-            'background' => imagecolorallocatealpha($this->image, $this->background_color['0'], $this->background_color['1'], $this->background_color['2'], $this->background_color['3']),
-            'text' => imagecolorallocatealpha($this->image, $this->text_color['0'], $this->text_color['1'], $this->text_color['2'], $this->text_color['3'])
-        );
-        
-        imagealphablending($this->image,false);
-        imagefilledrectangle($this->image,0,0,$this->width,$this->height,$this->pallete['background']);
-        imagealphablending($this->image,true);
-
-        // drawing's creation
-        $offset_y__active = $this->offset_y;
-        print_r($this->background_color);
-        print_r($this->text_color);
-        foreach ($this->lines as $line) {
-            $line = trim($line);
-            if ($this->is_simple)
-                imagestring ($this->image, $this->font, $this->offset_x, $offset_y__active, $line, $this->pallete['text']);
-            else
-                imagettftext($this->image, $this->text_size, $this->angle, $this->offset_x, $offset_y__active, $this->pallete['text'], $this->font, $line);
-            $offset_y__active += $this->line_height;
-        }
-        
-        if (!empty($this->background_image)) {
-          $this->add_background_image();
-        }
+    /**
+     * Устанавливает текст для изображения. Позволяет использовать цепочки методов.
+     *
+     * @param string $new_text Новый текст.
+     * @return self
+     */
+    public function setText($new_text = '') {
+        $this->text = $new_text;
+        return $this;
     }
     
-    protected function add_background_image() {
-        $is_error = false;
-        if (!file_exists($this->background_image)) {
-            return;
+    /**
+     * Устанавливает цвет текста.
+     *
+     * @param string|array $color Цвет в формате HEX ('#FFFFFF') или RGBA ([255, 255, 255, 0]).
+     * @return self
+     */
+    public function setTextColor($color) {
+        $this->text_color = $color;
+        return $this;
+    }
+
+    /**
+     * Устанавливает цвет фона.
+     *
+     * @param string|array $color Цвет в формате HEX ('#000000') или RGBA ([0, 0, 0, 0]).
+     * @return self
+     */
+    public function setBackgroundColor($color) {
+        $this->background_color = $color;
+        return $this;
+    }
+    
+    /**
+     * Устанавливает путь к файлу шрифта.
+     *
+     * @param string $font_path Путь к .ttf файлу.
+     * @return self
+     */
+    public function setFont($font_path) {
+        $this->font = $font_path;
+        $this->is_simple = false; // Использование TTF шрифта автоматически включает "умный" режим
+        return $this;
+    }
+
+    /**
+     * Устанавливает размер шрифта.
+     *
+     * @param int $size Размер шрифта.
+     * @return self
+     */
+    public function setFontSize($size) {
+        $this->text_size = (int)$size;
+        return $this;
+    }
+    
+    /**
+     * Устанавливает выравнивание текста.
+     *
+     * @param string $align Горизонтальное выравнивание (left, center, right).
+     * @param string $valign Вертикальное выравнивание (top, middle, bottom).
+     * @return self
+     */
+    public function setAlignment($align = self::ALIGN_LEFT, $valign = self::VALIGN_TOP) {
+        $this->align = $align;
+        $this->valign = $valign;
+        return $this;
+    }
+    
+    /**
+     * Применяет фильтр "оттенки серого" к изображению.
+     *
+     * @return self
+     */
+    public function applyGrayscale() {
+        if ($this->image) {
+            imagefilter($this->image, IMG_FILTER_GRAYSCALE);
         }
-        $tmp_image = @imagecreatefromjpeg($this->background_image);
-        if ($tmp_image == false) {
-            $tmp_image = @imagecreatefromjpeg($this->background_image);
+        return $this;
+    }
+    
+    /**
+     * Изменяет яркость изображения.
+     *
+     * @param int $level Уровень яркости. От -255 (темный) до 255 (светлый).
+     * @return self
+     */
+    public function applyBrightness($level) {
+        if ($this->image) {
+            imagefilter($this->image, IMG_FILTER_BRIGHTNESS, $level);
         }
-        if ($tmp_image == false) {
-            $tmp_image = @imagecreatefromgif($this->background_image);
+        return $this;
+    }
+
+    /**
+     * Сохраняет итоговое изображение в файл.
+     *
+     * @param string $path Путь для сохранения файла.
+     * @param string $type Формат изображения ('png', 'jpg', 'gif').
+     * @param int $quality Качество для jpg/png (0-100 для jpg, 0-9 для png).
+     * @return void
+     */
+    public function save($path, $type = 'png', $quality = 90) {
+        $this->render();
+        switch (strtolower($type)) {
+            case 'gif':
+                imagegif($this->image, $path);
+                break;
+            case 'jpg':
+            case 'jpeg':
+                imagejpeg($this->image, $path, ($quality > 100) ? 100 : $quality);
+                break;
+            case 'wbmp':
+                imagewbmp($this->image, $path);
+                break;
+            case 'png':
+            default:
+                // Качество для PNG - это уровень сжатия (0-9). Конвертируем 0-100 в 9-0.
+                $png_quality = 9 - round(($quality / 100) * 9);
+                imagepng($this->image, $path, $png_quality);
+                break;
         }
-        if ($tmp_image == false) {
-            $tmp_image = @imagecreatefrompng($this->background_image);
+        imagedestroy($this->image);
+    }
+
+    /**
+     * Выводит итоговое изображение напрямую в браузер.
+     *
+     * @param string $type Формат изображения ('png', 'jpg', 'gif').
+     * @param int $quality Качество для jpg/png.
+     * @return void
+     */
+    public function output($type = 'png', $quality = 90) {
+        $this->render();
+        header("Content-type: image/" . strtolower($type));
+        // Этот блок идентичен блоку в save(), но выводит в null (браузер)
+        switch (strtolower($type)) {
+            case 'gif':
+                imagegif($this->image);
+                break;
+            case 'jpg':
+            case 'jpeg':
+                imagejpeg($this->image, null, ($quality > 100) ? 100 : $quality);
+                break;
+            case 'wbmp':
+                imagewbmp($this->image);
+                break;
+            case 'png':
+            default:
+                $png_quality = 9 - round(($quality / 100) * 9);
+                imagepng($this->image, null, $png_quality);
+                break;
         }
-        if ($tmp_image == false) {
-            $tmp_image = @imagecreatefromwbmp($this->background_image);
+        imagedestroy($this->image);
+    }
+
+    /**
+     * Основной метод, который генерирует изображение.
+     * Вызывается автоматически методами save() или output().
+     */
+    protected function render() {
+        $this->parse_text();
+
+        // Рассчитываем итоговую высоту изображения
+        $this->height = count($this->lines) * $this->line_height;
+        if ($this->padding) {
+            $this->height += $this->padding * 2;
         }
-        if ($tmp_image == false) {
-            return;
-        }
-        //$width = imagesx($this->image);
-        //$height = imagesy($this->image);
-        imagecopy($tmp_image,$this->image,0,0,0,0,$this->width,$this->height);
-        $this->image = $tmp_image;
-      
-    }
 
+        // Создаем холст
+        $this->image = imagecreatetruecolor($this->width, $this->height);
 
-    // @getter for bg_image
-    public function get_background_image() {
-        return $this->background_image;
-    }
+        // Включаем прозрачность
+        imagesavealpha($this->image, true);
+        imagealphablending($this->image, true);
+        
+        // Конвертируем HEX цвета в RGBA, если необходимо
+        $bg_color_rgba = is_array($this->background_color) ? $this->background_color : $this->hex2rgb($this->background_color);
+        $text_color_rgba = is_array($this->text_color) ? $this->text_color : $this->hex2rgb($this->text_color);
 
-    // @setter for bg_image
-    public function set_background_image($new_background_image = '') {
-      $this->background_image = $new_background_image;
-    }
-
-    // @getter for mode
-    public function get_mode() {
-        return $this->is_simple;
-    }
-
-    // @setter for mode
-    public function set_mode($new_mode = true) {
-        if (is_string($new_mode)) {
-            if ($new_mode == 'simple')
-                $this->is_simple = true;
-            else
-                $this->is_simple = false;
-        } else
-            $this->is_simple = true;
-    }
-
-    // @getter for text
-    public function get_text() {
-        return $this->text;
-    }
-
-    // @setter for text
-    public function set_text($new_text = '') {
-        $this->text = $new_text;
-    }
-
-    // @adder for user defined font's
-    public function add_font($font_label, $font_path, $force_mode = null) {
-        $mode = $this->is_simple;
-        if (!is_null($force_mode))
-            $mode = $force_mode;
-
-        if ($mode == true) {
-            // simple-font, gdf-only
-            $this->user_fonts[$font_label] = imageloadfont($font_path);
+        // --- 1. Рисуем фон (изображение или цвет) ---
+        if (!empty($this->background_image) && file_exists($this->background_image)) {
+            $this->draw_background_image();
         } else {
-            // smart-font, ttf is recommended
-            $this->user_fonts[$font_label] = $font_path;
+            $bg_color_res = imagecolorallocatealpha($this->image, $bg_color_rgba[0], $bg_color_rgba[1], $bg_color_rgba[2], $bg_color_rgba[3]);
+            imagefill($this->image, 0, 0, $bg_color_res);
+        }
+
+        // --- 2. Рисуем текст ---
+        $text_color_res = imagecolorallocatealpha($this->image, $text_color_rgba[0], $text_color_rgba[1], $text_color_rgba[2], $text_color_rgba[3]);
+        
+        // Вертикальное выравнивание
+        $total_text_height = count($this->lines) * $this->line_height;
+        $y_start = $this->offset_y; // Начало для valign 'top'
+
+        if ($this->valign === self::VALIGN_MIDDLE) {
+            $y_start = ($this->height - $total_text_height) / 2 + $this->text_size;
+        } elseif ($this->valign === self::VALIGN_BOTTOM) {
+            $y_start = $this->height - $total_text_height - $this->padding + $this->text_size;
+        }
+        
+        $current_y = $y_start;
+
+        foreach ($this->lines as $line) {
+            $line = trim($line);
+            $x_start = $this->offset_x; // Начало для align 'left'
+
+            // Горизонтальное выравнивание
+            if ($this->align !== self::ALIGN_LEFT) {
+                $line_width = $this->calculate_text_width($line);
+                if ($this->align === self::ALIGN_CENTER) {
+                    $x_start = ($this->width - $line_width) / 2;
+                } elseif ($this->align === self::ALIGN_RIGHT) {
+                    $x_start = $this->width - $line_width - $this->padding;
+                }
+            }
+            
+            if ($this->is_simple) {
+                imagestring($this->image, $this->font, $x_start, $current_y - $this->text_size, $line, $text_color_res);
+            } else {
+                imagettftext($this->image, $this->text_size, $this->angle, $x_start, $current_y, $text_color_res, $this->font, $line);
+            }
+            $current_y += $this->line_height;
         }
     }
 
-    // @getter for user defined font's
-    public function get_font($font_label) {
-        if (isset($this->user_fonts[$font_label]))
-            return $this->user_fonts[$font_label];
-        else
-            return false;
+    /**
+     * Рисует фоновое изображение на холсте.
+     */
+    protected function draw_background_image() {
+        $bg_info = getimagesize($this->background_image);
+        $bg_mime = $bg_info['mime'];
+
+        switch ($bg_mime) {
+            case 'image/jpeg': $bg_res = imagecreatefromjpeg($this->background_image); break;
+            case 'image/png': $bg_res = imagecreatefrompng($this->background_image); break;
+            case 'image/gif': $bg_res = imagecreatefromgif($this->background_image); break;
+            default: return; // Неподдерживаемый тип
+        }
+        
+        // Масштабируем фоновое изображение, чтобы оно заполнило холст
+        imagecopyresampled(
+            $this->image, $bg_res,
+            0, 0, 0, 0,
+            $this->width, $this->height,
+            imagesx($bg_res), imagesy($bg_res)
+        );
+        
+        imagedestroy($bg_res);
+    }
+    
+    /**
+     * Подготавливает переменные, необходимые для расчетов.
+     */
+    protected function make_definitions() {
+        $this->pseudo_width = $this->width - ($this->padding * 2);
+
+        // Устанавливаем базовые отступы
+        $this->offset_x = $this->padding;
+        $this->offset_y = $this->padding + ($this->is_simple ? 0 : $this->text_size);
+
+        // Автоматический расчет высоты строки
+        if ($this->line_height == 'auto') {
+            if ($this->is_simple) {
+                $this->line_height = imagefontheight($this->font) * 1.5;
+            } else {
+                $this->line_height = $this->text_size * 1.5;
+            }
+        }
+
+        if ($this->is_simple) {
+            $this->characters_per_line = floor($this->pseudo_width / imagefontwidth($this->font));
+        }
     }
 
-    // @Support check
+    /**
+     * Разбивает исходный текст на строки, которые помещаются в заданную ширину.
+     */
+    protected function parse_text() {
+        $this->make_definitions();
+        $this->lines = [];
+        
+        if (empty($this->text)) {
+            return;
+        }
+        
+        // Разбиваем текст на строки по символу новой строки
+        $source_lines = preg_split("#(?:\r)?\n#", $this->text);
+
+        foreach ($source_lines as $line) {
+            // Если строка помещается в область, просто добавляем ее
+            if ($this->calculate_text_width($line) <= $this->pseudo_width) {
+                $this->lines[] = $line;
+                continue;
+            }
+            
+            // Если нет, разбиваем строку по словам
+            $words = preg_split('#(\s+)#', $line, -1, PREG_SPLIT_DELIM_CAPTURE);
+            $current_line = '';
+
+            foreach ($words as $word) {
+                // Проверяем, поместится ли следующее слово в текущую строку
+                $temp_line = $current_line . $word;
+                if ($this->calculate_text_width($temp_line) > $this->pseudo_width) {
+                    // Если нет, сохраняем текущую строку и начинаем новую со слова
+                    $this->lines[] = trim($current_line);
+                    $current_line = $word;
+                } else {
+                    // Если да, добавляем слово к текущей строке
+                    $current_line = $temp_line;
+                }
+            }
+            // Добавляем последнюю собранную строку
+            $this->lines[] = trim($current_line);
+        }
+    }
+
+    /**
+     * Рассчитывает ширину строки текста в пикселях.
+     *
+     * @param string $text Строка для измерения.
+     * @return int Ширина в пикселях.
+     */
+    protected function calculate_text_width($text) {
+        if ($this->is_simple) {
+            return mb_strlen($text, 'utf-8') * imagefontwidth($this->font);
+        } else {
+            if (!file_exists($this->font)) {
+                // Если шрифт не найден, возвращаем 0, чтобы избежать ошибок
+                return 0;
+            }
+            $box = imagettfbbox($this->text_size, $this->angle, $this->font, $text);
+            return abs($box[4] - $box[0]);
+        }
+    }
+
+    /**
+     * Конвертирует цвет из формата HEX в массив RGBA.
+     * Поддерживает #rgb, #rrggbb, #rrggbbaa.
+     *
+     * @param string $hex HEX-код цвета.
+     * @return array Массив [R, G, B, A]. Альфа-канал: 0 (непрозрачный) - 127 (прозрачный).
+     */
+    protected function hex2rgb($hex) {
+        $hex = str_replace('#', '', $hex);
+        $length = strlen($hex);
+
+        switch($length) {
+            case 3: // #rgb
+                $r = hexdec(substr($hex, 0, 1) . substr($hex, 0, 1));
+                $g = hexdec(substr($hex, 1, 1) . substr($hex, 1, 1));
+                $b = hexdec(substr($hex, 2, 1) . substr($hex, 2, 1));
+                $a = 0; // непрозрачный
+                break;
+            case 6: // #rrggbb
+                $r = hexdec(substr($hex, 0, 2));
+                $g = hexdec(substr($hex, 2, 2));
+                $b = hexdec(substr($hex, 4, 2));
+                $a = 0; // непрозрачный
+                break;
+            case 8: // #rrggbbaa
+                $r = hexdec(substr($hex, 0, 2));
+                $g = hexdec(substr($hex, 2, 2));
+                $b = hexdec(substr($hex, 4, 2));
+                // Альфа в HEX: 00 (прозрачный) - FF (непрозрачный)
+                // Альфа в GD: 127 (прозрачный) - 0 (непрозрачный)
+                $a_hex = hexdec(substr($hex, 6, 2));
+                $a = intval(127 - ($a_hex / 255) * 127);
+                break;
+            default:
+                return [0, 0, 0, 0]; // Возвращаем черный цвет по умолчанию
+        }
+        return [$r, $g, $b, $a];
+    }
+
+    /**
+     * Проверяет, загружено ли расширение GD.
+     *
+     * @return bool
+     */
     public function is_supported() {
-        if (extension_loaded('gd'))
-            return true;
-        else
-            return false;
-    }
-
-    // @Typetypes support check
-    public function is_imagetype_supported($type) {
-        switch (strtolower($type)) {
-            case 'gif'; return imagetypes() & IMG_GIF; break;
-            case 'png'; return imagetypes() & IMG_PNG; break;
-            case 'jpg'; return imagetypes() & IMG_JPG; break;
-            case 'wbmp'; return imagetypes() & IMG_WBMP; break;
-        }
-        return false;
-    }
-
-    // @output result image into browser
-    public function output($type = 'png', $quality = 100) {
-        $this->render();
-        header("Content-type: image/png");
-        switch (strtolower($type)) {
-            case 'gif'; imagegif($this->image, null); break;
-            case 'png'; imagepng($this->image, null, ($quality > 9) ? 9 : $quality ); break;
-            case 'jpg'; imagejpeg($this->image, null, ($quality > 100) ? 100 : $quality ); break;
-            case 'wbmp'; imagewbmp($this->image, null, $this->pallete['background']); break;
-        }
-    }
-
-    // @save result image into file
-    public function save($path, $type = 'png', $quality = 100) {
-        $this->render();
-        switch (strtolower($type)) {
-            case 'gif'; imagegif($this->image, $path); break;
-            case 'png'; imagepng($this->image, $path, ($quality > 9) ? 9 : $quality ); break;
-            case 'jpg'; imagejpeg($this->image, $path, ($quality > 100) ? 100 : $quality ); break;
-            case 'wbmp'; imagewbmp($this->image, $path, $this->pallete['background']); break;
-        }
+        return extension_loaded('gd');
     }
 }
